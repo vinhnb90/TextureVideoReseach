@@ -24,11 +24,17 @@ public class VideoSizeCalculator {
     }
 
     protected Dimens measure(int widthMeasureSpec, int heightMeasureSpec) {
-        View.MeasureSpec.getMode(widthMeasureSpec);
+        //get size ban đầu tùy thuộc vào layout param
+        //ví dụ match parent, wrap content hay exactly set
         int width = View.getDefaultSize(mVideoWidth, widthMeasureSpec);
         int height = View.getDefaultSize(mVideoHeight, heightMeasureSpec);
-        if (hasASizeYet()) {
 
+        //ở trường hợp chưa có video size (nó được set khi đã prepare xong video, hoặc thay đổi size video)
+        //thì return dimens là size ban đầu được đặt
+        if (hasASizeYet()) {
+            //nếu có size mới của video đc update thì
+            //get mode hiện tại (ở thời điểm hiện tại)
+            //get size định rõ tại ...SpecSize (tức pixel)
             int widthSpecMode = View.MeasureSpec.getMode(widthMeasureSpec);
             int widthSpecSize = View.MeasureSpec.getSize(widthMeasureSpec);
             int heightSpecMode = View.MeasureSpec.getMode(heightMeasureSpec);
@@ -40,6 +46,7 @@ public class VideoSizeCalculator {
                 height = heightSpecSize;
 
                 // for compatibility, we adjust size based on aspect ratio
+                //chia tỉ lệ lại cho đúng theo như tỉ lệ video
                 if (mVideoWidth * height < width * mVideoHeight) {
                     width = height * mVideoWidth / mVideoHeight;
                 } else if (mVideoWidth * height > width * mVideoHeight) {
@@ -47,9 +54,11 @@ public class VideoSizeCalculator {
                 }
             } else if (widthSpecMode == View.MeasureSpec.EXACTLY) {
                 // only the width is fixed, adjust the height to match aspect ratio if possible
+                //nếu chỉ fix mỗi width thì chỉnh height
                 width = widthSpecSize;
                 height = width * mVideoHeight / mVideoWidth;
                 if (heightSpecMode == View.MeasureSpec.AT_MOST && height > heightSpecSize) {
+                    //nếu height có mode ít nhất thì lấy max hegiht là heightSpecSize
                     // couldn't match aspect ratio within the constraints
                     height = heightSpecSize;
                 }
