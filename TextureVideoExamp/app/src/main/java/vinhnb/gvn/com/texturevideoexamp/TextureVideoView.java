@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.graphics.Canvas;
 import android.graphics.SurfaceTexture;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
@@ -42,7 +43,10 @@ import java.util.concurrent.TimeUnit;
  * change from its previously returned value when the VideoView is restored.
  */
 
-public class TextureVideoView extends android.view.TextureView implements MediaController.MediaPlayerControl {
+
+public class TextureVideoView extends android.view.TextureView implements MediaController.MediaPlayerControl
+        , Player//thêm
+{
 
     public static final String TAG = "TextureVideoView";
     public static final int VIDEO_BEGINNING = 0;
@@ -62,7 +66,8 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     // We should keep this close to android.widget.MediaController,
     // so that porting a controller to android's VideoView remains manageable.
     public interface VideoController {
-        void setMediaPlayer(MediaController.MediaPlayerControl player);
+        // void setMediaPlayer(MediaController.MediaPlayerControl player);
+        void setMediaPlayer(Player player);
 
         void setEnabled(boolean value);
 
@@ -74,15 +79,15 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
 
         void hide();
 
-        // Should not be here!
-        // this should be handled internally, not triggered from outside the controller.
-        // it is specific to the concert play.
-        void hidePreviousPieceButton();
+//        // Should not be here!
+//        // this should be handled internally, not triggered from @outside the controller.
+//        // it is specific to the concert play.
+//        void hidePreviousPieceButton();
 
-        // Should not be here!
-        // this should be handled internally, not triggered from outside the controller.
-        // it is specific to the concert play.
-        void hideNextPieceButton();
+//        // Should not be here!
+//        // this should be handled internally, not triggered from @outside the controller.
+//        // it is specific to the concert play.
+//        void hideNextPieceButton();
     }
 
     private static final ReplayListener NULL_REPLAY_LISTENER = new ReplayListener() {
@@ -121,7 +126,9 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     private SurfaceTexture mSurfaceTexture;
     private MediaPlayer mMediaPlayer = null;
     private int mAudioSession;
-    private MediaController mConcertPlayerController;
+    //    private MediaController mConcertPlayerController;
+    private PlayerController mConcertPlayerController;
+
     private OnCompletionListener mOnCompletionListener;
     private MediaPlayer.OnPreparedListener mOnPreparedListener;
     private int mCurrentBufferPercentage;
@@ -159,8 +166,14 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         this.replayListener = replayListener != null ? replayListener : NULL_REPLAY_LISTENER;
     }
 
+
     @Override
     protected void onMeasure(final int widthMeasureSpec, final int heightMeasureSpec) {
+        //onAttachedToWindow -> measure() -> onMesure() -> layout() -> onLayout() -> dispatchDraw() -> draw()(final method)  -> onDraw() -> user input......
+        //user input...... -> requestLayout() -> onAttachedToWindow
+        //user input...... -> invalidate() -> onDraw()
+
+        //tính toán (measure) ở lần đầu từ xml
         VideoSizeCalculator.Dimens dimens = videoSizeCalculator.measure(widthMeasureSpec, heightMeasureSpec);
         setMeasuredDimension(dimens.getWidth(), dimens.getHeight());
     }
@@ -183,14 +196,22 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
 
     private void initVideoView() {
         videoSizeCalculator.setVideoSize(0, 0);
-
+        //lắng nghe khung hình SurfaceTexture
         setSurfaceTextureListener(mSTListener);
 
+        //cho phép focus
         setFocusable(true);
+
+        //forcus in mode Touch (there is no focus and no selection.) ex trackball
         setFocusableInTouchMode(true);
+
+        //cần forcus
         requestFocus();
+
         mCurrentState = STATE_IDLE;
         mTargetState = STATE_IDLE;
+
+        //set info @outside
         setOnInfoListener(onInfoToPlayStateListener);
     }
 
@@ -200,6 +221,10 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
 
     private void setVideo(final Uri uri, final int seekInSeconds) {
         setVideoURI(uri, null, seekInSeconds);
+    }
+
+    public void setVideo(final String url, final int seekInSeconds) {
+        setVideoURI(Uri.parse(url), null, seekInSeconds);
     }
 
     private void setVideoURI(final Uri uri, final Map<String, String> headers, final int seekInSeconds) {
@@ -229,39 +254,48 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     }
 
     private void openVideo() {
+        //check uri
+        //check
         if (notReadyForPlaybackJustYetWillTryAgainLater()) {
             return;
         }
+
+        //tạm dừng muscic hệ thống
         tellTheMusicPlaybackServiceToPause();
 
         // we shouldn't clear the target state, because somebody might have called start() previously
-        release(false);
         try {
+            //release tài nguyên nhưng ko clear target state
+            release(false);
             mMediaPlayer = new MediaPlayer();
 
+            //mỗi thực thể Media có 1 audio seesion sinh ra
+            //gán lại session mỗi lần open video
             if (mAudioSession != 0) {
                 mMediaPlayer.setAudioSessionId(mAudioSession);
             } else {
                 mAudioSession = mMediaPlayer.getAudioSessionId();
             }
-            mMediaPlayer.setOnPreparedListener(mPreparedListener);
-            mMediaPlayer.setOnVideoSizeChangedListener(mSizeChangedListener);
-            mMediaPlayer.setOnCompletionListener(mCompletionListener);
-            mMediaPlayer.setOnErrorListener(mErrorListener);
-            mMediaPlayer.setOnInfoListener(mInfoListener);
-            mMediaPlayer.setOnBufferingUpdateListener(mBufferingUpdateListener);
-            mCurrentBufferPercentage = 0;
-            mMediaPlayer.setDataSource(getContext(), mUri, mHeaders);
-            mMediaPlayer.setSurface(new Surface(mSurfaceTexture));
-            mMediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-            mMediaPlayer.setScreenOnWhilePlaying(true);
-            mMediaPlayer.prepareAsync();
+
+            //call back
+            mMediaPlayer.setOnPreparedListener(mPreparedListener);//prepared xong video
+            mMediaPlayer.setOnVideoSizeChangedListener(mSizeChangedListener);//change size
+            mMediaPlayer.setOnCompletionListener(mCompletionListener);//play xong video
+            mMediaPlayer.setOnErrorListener(mErrorListener);//error video (ko thể play)
+            mMediaPlayer.setOnInfoListener(mInfoListener);//dettech 1 vài trạng thái để thông báo tới người dùng @outside(ko phải bị error)
+            mMediaPlayer.setOnBufferingUpdateListener(mBufferingUpdateListener);//khi có buffering mới cập nhật
+            mCurrentBufferPercentage = 0;//reset lượng buffer hiện tại nó sẽ tăng khi mBufferingUpdateListener được goi
+            mMediaPlayer.setDataSource(getContext(), mUri, mHeaders);//set data, gồm uri, mHeaders cho 1 số định dạng video
+            mMediaPlayer.setSurface(new Surface(mSurfaceTexture));// set màn hình surface với frames mSurfaceTexture có được khi onSurfaceTextureAvailable()
+            mMediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);//chạy chế độ music
+            mMediaPlayer.setScreenOnWhilePlaying(true);//cho phép giữ màn hình khi chạy lại ví dụ như case wakeup
+            mMediaPlayer.prepareAsync();//không đồng bộ
 
             // we don't set the target state here either, but preserve the target state that was there before.
             mCurrentState = STATE_PREPARING;
-            attachMediaController();
+            attachMediaController();//gắn media controller mConcertPlayerController
         } catch (final IOException ex) {
-            notifyUnableToOpenContent(ex);
+            notifyUnableToOpenContent(ex);//gửi error với MEDIA_ERROR_UNKNOWN
         } catch (final IllegalArgumentException ex) {
             notifyUnableToOpenContent(ex);
         }
@@ -279,13 +313,15 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     }
 
     private void notifyUnableToOpenContent(final Exception ex) {
-        Log.w("Unable to open content: " + mUri, ex);
+        Log.w(TAG, "Unable to open content: " + mUri, ex);
         mCurrentState = STATE_ERROR;
         mTargetState = STATE_ERROR;
         mErrorListener.onError(mMediaPlayer, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0);
     }
 
-    public void setMediaController(final MediaController controller) {
+
+    //    public void setMediaController(final MediaController controller) {
+    public void setMediaController(final PlayerController controller) {
         hideMediaController();
         mConcertPlayerController = controller;
         attachMediaController();
@@ -313,8 +349,12 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     private MediaPlayer.OnVideoSizeChangedListener mSizeChangedListener = new MediaPlayer.OnVideoSizeChangedListener() {
         @Override
         public void onVideoSizeChanged(final MediaPlayer mp, final int width, final int height) {
+            //up date video size = mediaPlayer size
+            // size có thể = 0
             videoSizeCalculator.setVideoSize(mp.getVideoWidth(), mp.getVideoHeight());
             if (videoSizeCalculator.hasASizeYet()) {
+                //nếu size này thực sự #0
+                //làm mới lại layout
                 requestLayout();
             }
         }
@@ -325,27 +365,39 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         public void onPrepared(final MediaPlayer mp) {
             mCurrentState = STATE_PREPARED;
 
+            //flag
             mCanPause = true;
             mCanSeekBack = true;
             mCanSeekForward = true;
 
+            //call OnPreparedListener from @outside
             if (mOnPreparedListener != null) {
                 mOnPreparedListener.onPrepared(mMediaPlayer);
             }
+
+            //enable
             if (mConcertPlayerController != null) {
                 mConcertPlayerController.setEnabled(true);
             }
+
+            //set video size real when load done video
             videoSizeCalculator.setVideoSize(mp.getVideoWidth(), mp.getVideoHeight());
 
+            //mSeekWhenPrepared chagne
             int seekToPosition = mSeekWhenPrepared;  // mSeekWhenPrepared may be changed after seekTo() call
             if (seekToPosition != 0) {
-                seekTo(seekToPosition);
+                seekTo(seekToPosition); // if is state can play then seek to, reset mSeekWhenPrepared... else giữ nguyên ko seekto
             }
 
             if (mTargetState == STATE_PLAYING) {
+                //nếu mục đích là chạy thì bắt đầu chạy
                 start();
+                //show controller sau 3 s
                 showMediaController();
             } else if (pausedAt(seekToPosition)) {
+                //nesu tạm dừng tại 1 điểm mSeekWhenPrepared
+                //thì show media
+                //show controller sau 0 s
                 showStickyMediaController();
             }
         }
@@ -361,20 +413,26 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         }
     }
 
-    private OnCompletionListener mCompletionListener = new OnCompletionListener() {
 
+    private OnCompletionListener mCompletionListener = new OnCompletionListener() {
         @Override
         public void onCompletion(final MediaPlayer mp) {
+            //ngừng màn hình
+            //ngừng thông báo state đang chạy @outside
             setKeepScreenOn(false);
             stopPingLoop();
+
             mCurrentState = STATE_PLAYBACK_COMPLETED;
             mTargetState = STATE_PLAYBACK_COMPLETED;
+
+            //ẩn media
             hideMediaController();
             if (mOnCompletionListener != null) {
                 mOnCompletionListener.onCompletion(mMediaPlayer);
             }
         }
     };
+
 
     private OnInfoListener mInfoListener = new OnInfoListener() {
         @Override
@@ -390,21 +448,28 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         @Override
         public boolean onError(final MediaPlayer mp, final int frameworkError, final int implError) {
             Log.d(TAG, "Error: " + frameworkError + "," + implError);
+            //nếu state lỗi thì đã được thông báo ngay lúc đó rồi, ko cần xử lý
             if (mCurrentState == STATE_ERROR) {
                 return true;
             }
+
             mCurrentState = STATE_ERROR;
             mTargetState = STATE_ERROR;
             hideMediaController();
 
+            //nếu có lỗi từ source thì thông báo @outside
+            //return true chỉ khi có callback đc setup
             if (allowPlayStateToHandle(frameworkError)) {
                 return true;
             }
 
+            //nếu lỗi khi play thì thông báo @outside qua callback được setup
+            //không bao h return
             if (allowErrorListenerToHandle(frameworkError, implError)) {
                 return true;
             }
 
+            //show dialog lỗi
             handleError(frameworkError);
             return true;
         }
@@ -441,6 +506,7 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     }
 
     private void handleError(final int frameworkError) {
+        //show dialog lỗi
         if (getWindowToken() != null) {
             if (errorDialog != null && errorDialog.isShowing()) {
                 Log.d(TAG, "Dismissing last error dialog for a new one");
@@ -457,9 +523,9 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
                 .setPositiveButton(android.R.string.ok,
                         new DialogInterface.OnClickListener() {
                             public void onClick(final DialogInterface dialog, final int whichButton) {
-                                    /* If we get here, there is no onError listener, so
-                                     * at least inform them that the video is over.
-                                     */
+                                /* If we get here, there is no onError listener, so
+                                 * at least inform them that the video is over.
+                                 */
                                 if (completionListener != null) {
                                     completionListener.onCompletion(mediaPlayer);
                                 }
@@ -544,14 +610,23 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
     private SurfaceTextureListener mSTListener = new SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(final SurfaceTexture surface, final int width, final int height) {
+            //mSurfaceTexture có thể bị null nếu chưa attach window
             mSurfaceTexture = surface;
+
+            //những thứ cài đặt chi tiết chỉ có thể thực hiện sau khi onSurfaceTextureAvailable ok
             openVideo();
         }
 
         @Override
         public void onSurfaceTextureSizeChanged(final SurfaceTexture surface, final int width, final int height) {
+            //when setOnVideoSizeChangedListener() then videoSizeCalculator đã được update setVideoSize và requestLayout
+            //ở đây khi SurfaceTexture change
+            //check xem state target có phải STATE_PLAYING (đã prepared done) tức đã gọi startVideo()
             boolean isValidState = (mTargetState == STATE_PLAYING);
+            //check xem size SurfaceTexture có thực đúng = size của video của setOnVideoSizeChangedListener()
             boolean hasValidSize = videoSizeCalculator.currentSizeIs(width, height);
+
+            //nếu OK tất cả thì đã sẵn sàng start() tại thời điểm mSeekWhenPrepared
             if (mMediaPlayer != null && isValidState && hasValidSize) {
                 if (mSeekWhenPrepared != 0) {
                     seekTo(mSeekWhenPrepared);
@@ -562,6 +637,7 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
 
         @Override
         public boolean onSurfaceTextureDestroyed(final SurfaceTexture surface) {
+            //release
             mSurfaceTexture = null;
             hideMediaController();
             release(true);
@@ -570,6 +646,7 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
 
         @Override
         public void onSurfaceTextureUpdated(final SurfaceTexture surface) {
+            //update SurfaceTexture = SurfaceTexture hiện tại
             mSurfaceTexture = surface;
         }
     };
@@ -605,6 +682,13 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         return false;
     }
 
+    /**
+     * xử lý khi kết hợp với các ngữ cảnh mà chắc chắn người dùng sẽ muốn app sẽ làm
+     *
+     * @param keyCode
+     * @param event
+     * @return
+     */
     @Override
     public boolean onKeyDown(final int keyCode, final KeyEvent event) {
         boolean isKeyCodeSupported = keyCode != KeyEvent.KEYCODE_BACK &&
@@ -644,22 +728,34 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         return super.onKeyDown(keyCode, event);
     }
 
+    //region MediaController.MediaPlayerControl
     @Override
     public void start() {
         if (isInPlaybackState()) {
+            //nếu hiện tại đang ở state cho phép play
+            //thì start
             mMediaPlayer.start();
+
+            //tiếp tục màn hình
             setKeepScreenOn(true);
             mCurrentState = STATE_PLAYING;
         }
+
         mTargetState = STATE_PLAYING;
         startPingLoop();
     }
 
     private void startPingLoop() {
+        //lấy handler của view
+        //nếu null thì không thể update lên UI
+        //then return
         final Handler handler = getHandler();
         if (handler == null) {
             return;
         }
+
+        //refresh call back
+        //call back : 10s thì update 1 lần về việc vẫn đang chạy ra ngoài @outside
         handler.removeCallbacks(replayNotifyRunnable);
         handler.post(replayNotifyRunnable);
     }
@@ -781,23 +877,28 @@ public class TextureVideoView extends android.view.TextureView implements MediaC
         }
         return mAudioSession;
     }
+    //endregion
 
     private final OnInfoListener onInfoToPlayStateListener = new OnInfoListener() {
 
         @Override
         public boolean onInfo(final MediaPlayer mp, final int what, final int extra) {
             if (noPlayStateListener()) {
+                //nếu ko có setup giao diện @outside từ bên ngoài
                 return false;
             }
 
             if (MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START == what) {
+                //first video frame for rendering
                 onPlayStateListener.onFirstVideoFrameRendered();
                 onPlayStateListener.onPlay();
             }
             if (MediaPlayer.MEDIA_INFO_BUFFERING_START == what) {
+                //when video tạm dừng phát nội bộ để tiếp nhận thêm buffer mới
                 onPlayStateListener.onBuffer();
             }
             if (MediaPlayer.MEDIA_INFO_BUFFERING_END == what) {
+                //when ok buffer mới thì thông báo play trở lại
                 onPlayStateListener.onPlay();
             }
 
